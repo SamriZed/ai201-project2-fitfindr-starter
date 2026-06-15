@@ -108,6 +108,8 @@ If `outfit` is missing, empty, or incomplete, return `None` or an error structur
 **How does information from one tool get passed to the next?**
 <!-- Describe how your agent stores and accesses state within a session. What data is tracked? How is it passed between tool calls? -->
 The agent maintains a single `session` object with these fields: `query` (the user's original message), `search_results` (the list returned by `search_listings`), `selected_item` (the top result from `search_results`), `wardrobe` (the current wardrobe dict), `outfit` (the outfit suggestion returned by `suggest_outfit`), `fit_card` (the caption returned by `create_fit_card`), `last_error` (error code string or None), and `message` (user-facing message). The Planning Loop reads from session before each tool call and writes to session after each tool returns. For example, after `search_listings` returns, the loop writes `session.search_results = results` and `session.selected_item = results[0]`. Then `suggest_outfit` reads `session.selected_item` and `session.wardrobe` and writes `session.outfit`. Finally, `create_fit_card` reads `session.outfit` and `session.selected_item` and writes `session.fit_card`. If an error occurs, the agent sets `session.last_error` to an error code and `session.message` to a user-facing explanation, then returns early without modifying other fields.
+
+
 ---
 
 ## Error Handling
