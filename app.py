@@ -43,8 +43,44 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            string and return it along with session["outfit_suggestion"] and
            session["fit_card"].
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    # 1. Guard against an empty query — nothing to search for.
+    if not user_query or not user_query.strip():
+        return "Please enter what you're looking for.", "", ""
+
+    # 2. Select the wardrobe based on the radio choice.
+    if wardrobe_choice == "Empty wardrobe (new user)":
+        wardrobe = get_empty_wardrobe()
+    else:
+        wardrobe = get_example_wardrobe()
+
+    # 3. Run the planning loop.
+    session = run_agent(user_query.strip(), wardrobe)
+
+    # 4. On any early-exit error, show it in the listing panel only.
+    if session["error"]:
+        return session["error"], "", ""
+
+    # 5. Format the selected listing and map the outfit + fit card to panels.
+    item = session["selected_item"]
+    #print(item)
+    listing_text = (
+        f"{item['title']}\n"
+        f"${item['price']:.2f} · {item['platform']}\n"
+        f"Size: {item['size']} · Condition: {item['condition']}\n"
+        f"Brand: {item.get('brand') or 'Unbranded'}\n"
+        f"Colors: {', '.join(item['colors'])}\n"
+        f"Style: {', '.join(item['style_tags'])}\n\n"
+        f"{item['description']}"
+    )
+
+    # outfit_suggestion is an outfit dict — pull out the recommendation string.
+    outfit = session["outfit_suggestion"]
+    #print(outfit)
+    outfit_text = outfit["recommendation"] if isinstance(outfit, dict) else (outfit or "")
+
+    fit_card = session["fit_card"] or ""
+
+    return listing_text, outfit_text, fit_card
 
 
 # ── interface ─────────────────────────────────────────────────────────────────

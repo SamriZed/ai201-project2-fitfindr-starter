@@ -18,12 +18,50 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
+from typing import Any
+
 from tools import search_listings, suggest_outfit, create_fit_card
+
+
+# ── query parsing ─────────────────────────────────────────────────────────────
+
+def _parse_query(query: str) -> dict:
+    """
+    Extract a search description plus an optional size and max_price from a
+    natural-language query. Size and max_price are only set when the user
+    actually mentions them — otherwise they stay None.
+    """
+    text = query or ""
+
+    # max_price: "under $30", "below 25", "max $40", "up to 50", or a bare "$30".
+    price_match = re.search(
+        r"(?:under|below|less than|max(?:imum)?|up to|cheaper than|<=?)\s*\$?\s*(\d+(?:\.\d+)?)",
+        text,
+        re.IGNORECASE,
+    )
+    if not price_match:
+        price_match = re.search(r"\$\s*(\d+(?:\.\d+)?)", text)
+    max_price = float(price_match.group(1)) if price_match else None
+
+    # size: "size M", "size XXS", "size W30".
+    size_match = re.search(r"\bsize[:\s]+([A-Za-z0-9/]+)", text, re.IGNORECASE)
+    size = size_match.group(1).upper() if size_match else None
+
+    # description: the query with the size/price phrases stripped out.
+    description = text
+    if price_match:
+        description = description.replace(price_match.group(0), " ")
+    if size_match:
+        description = description.replace(size_match.group(0), " ")
+    description = re.sub(r"\s+", " ", description).strip()
+
+    return {"description": description, "size": size, "max_price": max_price}
 
 
 # ── session state ─────────────────────────────────────────────────────────────
 
-def _new_session(query: str, wardrobe: dict) -> dict:
+def _new_session(query: str, wardrobe: dict) -> dict[str, Any]:
     """
     Initialize and return a fresh session dict for one user interaction.
 
@@ -47,7 +85,7 @@ def _new_session(query: str, wardrobe: dict) -> dict:
 
 # ── planning loop ─────────────────────────────────────────────────────────────
 
-def run_agent(query: str, wardrobe: dict) -> dict:
+def run_agent(query: str, wardrobe: dict) -> dict[str, Any]:
     """
     Main agent entry point. Runs the FitFindr planning loop for a single
     user interaction and returns the completed session dict.
@@ -92,9 +130,60 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: initialize the session — the single source of truth for this run.
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: parse the query into search parameters.
+    parsed = _parse_query(query)
+    session["parsed"] = parsed
+
+    # Step 3: search listings. If nothing matches, stop here — do not proceed
+    # to suggest_outfit with empty input.
+    results = search_listings(
+        description=parsed["description"],
+        size=parsed["size"],
+        max_price=parsed["max_price"],
+    )
+    session["search_results"] = results
+    if not results:
+        session["error"] = (
+            "No listings matched your search. Try broadening the style, size, or price."
+        )
+        return session
+
+    # Step 4: select the top-ranked listing to style.
+    session["selected_item"] = results[0]
+
+    # (Planning step 6) Empty wardrobe — found an item but nothing to style it
+    # with. Stop before suggest_outfit / create_fit_card.
+    if not (wardrobe or {}).get("items"):
+        session["error"] = (
+            "I found an item, but I need wardrobe pieces to style it. "
+            "Add items to your closet or use the example wardrobe for testing."
+        )
+        return session
+
+    # Step 5: suggest an outfit from the wardrobe. suggest_outfit returns None
+    # when it can't build one — treat that as an early exit, not a crash.
+    outfit = suggest_outfit(session["selected_item"], wardrobe)
+    if not outfit:
+        session["error"] = (
+            "I found the item, but couldn't build a compatible outfit from the wardrobe."
+        )
+        return session
+    session["outfit_suggestion"] = outfit
+
+    # Step 6: turn the outfit into a shareable fit-card caption. create_fit_card
+    # returns an "Error: ..." string rather than raising on bad input.
+    fit_card = create_fit_card(outfit, session["selected_item"])
+    if not fit_card or fit_card.lower().startswith("error"):
+        session["error"] = (
+            "I found the item and built an outfit, but couldn't generate a caption."
+        )
+        return session
+    session["fit_card"] = fit_card
+
+    # Step 7: success — every field is populated and error stays None.
     return session
 
 
@@ -111,8 +200,10 @@ if __name__ == "__main__":
     if session["error"]:
         print(f"Error: {session['error']}")
     else:
+        outfit = session["outfit_suggestion"]
+        recommendation = outfit["recommendation"] if isinstance(outfit, dict) else outfit
         print(f"Found: {session['selected_item']['title']}")
-        print(f"\nOutfit: {session['outfit_suggestion']}")
+        print(f"\nOutfit: {recommendation}")
         print(f"\nFit card: {session['fit_card']}")
 
     print("\n\n=== No-results path ===\n")
